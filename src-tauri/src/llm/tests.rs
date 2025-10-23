@@ -13,7 +13,7 @@ mod model_tests {
         model_path.push("models/Qwen3-1.7B-IQ4_XS.gguf");
         
         let config = LLMConfig {
-            model_path,
+            model_path: model_path.to_string_lossy().to_string(),
             n_ctx: 2048,
             n_threads: 4,
             temperature: 0.7,
@@ -21,6 +21,10 @@ mod model_tests {
             top_k: 40,
             repeat_penalty: 1.1,
             max_tokens: 512,
+            context_size: 2048,
+            use_gpu: false,
+            n_gpu_layers: 0,
+            main_gpu: 0,
         };
 
         let engine = LLMEngine::new(config).expect("Failed to create LLM engine");
@@ -48,7 +52,7 @@ mod model_tests {
         model_path.push("models/Qwen3-1.7B-IQ4_XS.gguf");
         
         let config = LLMConfig {
-            model_path,
+            model_path: model_path.to_string_lossy().to_string(),
             n_ctx: 2048,
             n_threads: 4,
             temperature: 0.7,
@@ -56,6 +60,10 @@ mod model_tests {
             top_k: 40,
             repeat_penalty: 1.1,
             max_tokens: 512,
+            context_size: 2048,
+            use_gpu: false,
+            n_gpu_layers: 0,
+            main_gpu: 0,
         };
 
         let engine = LLMEngine::new(config).expect("Failed to create engine");

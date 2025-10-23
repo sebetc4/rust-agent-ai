@@ -13,15 +13,15 @@ export function MessageList({ messages }: MessageListProps) {
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      scrollRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
   }, [messages]);
 
   return (
-    <ScrollArea className="flex-1 px-4">
-      <div ref={scrollRef} className="space-y-4 py-4">
+    <ScrollArea className="h-full w-full">
+      <div className="space-y-4 p-4">
         {messages.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-muted-foreground">
+          <div className="flex items-center justify-center min-h-[200px] text-muted-foreground">
             <p>No messages yet. Start a conversation!</p>
           </div>
         ) : (
@@ -29,6 +29,7 @@ export function MessageList({ messages }: MessageListProps) {
             <ChatMessage key={message.id} message={message} />
           ))
         )}
+        <div ref={scrollRef} />
       </div>
     </ScrollArea>
   );

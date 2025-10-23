@@ -2,12 +2,12 @@
 pub mod llm;
 pub mod context;
 pub mod mcp;
+pub mod huggingface;
+
+use llm::{LLMEngine, LLMConfig, ModelManager, ModelInfo};
+use huggingface::{HuggingFaceClient, ModelSearchParams, HFModelInfo};
 
 use tauri::Manager;
-use llm::{LLMEngine, LLMConfig, ModelManager, ModelInfo};
-use context::{ContextManager, Message, MessageRole, ConversationSession};
-use mcp::MCPServer;
-use mcp::tools::{create_file_reader_tool, create_file_writer_tool};
 use std::sync::Arc;
 use tauri::State;
 use tokio::sync::RwLock;
@@ -16,13 +16,10 @@ use tracing_subscriber;
 
 /// État global de l'application
 pub struct AppState {
-    llm_engine: Arc<RwLock<LLMEngine>>,
-    context_manager: Arc<ContextManager>,
-    mcp_server: Arc<MCPServer>,
-    model_manager: Arc<ModelManager>,
-}
-
-// ===== Commandes Tauri =====
+    pub llm_engine: Arc<RwLock<LLMEngine>>,
+    pub model_manager: Arc<ModelManager>,
+    pub hf_client: Arc<RwLock<HuggingFaceClient>>,
+}// ===== Commandes Tauri =====
 #[tauri::command]
 async fn initialize_llm(
     state: State<'_, Arc<AppState>>,
@@ -44,7 +41,7 @@ async fn initialize_llm(
     // Update config and load model
     {
         let mut config = engine.config.clone();
-        config.model_path = model_path;
+        config.model_path = model_path.to_string_lossy().to_string();
         drop(engine); // Release read lock
         
         let mut engine_write = state.llm_engine.write().await;
@@ -68,6 +65,7 @@ async fn generate_response(
     Ok(response.text)
 }
 
+/*
 #[tauri::command]
 async fn create_session(
     state: State<'_, Arc<AppState>>,
@@ -103,7 +101,9 @@ async fn add_message(
         .await
         .map_err(|e| e.to_string())
 }
+*/
 
+/*
 #[tauri::command]
 async fn get_session(
     state: State<'_, Arc<AppState>>,
@@ -142,7 +142,9 @@ async fn list_tools(
     let tools = registry.list_tools();
     Ok(tools.iter().map(|t| t.name.clone()).collect())
 }
+*/
 
+/*
 #[tauri::command]
 async fn execute_tool(
     state: State<'_, Arc<AppState>>,
@@ -158,6 +160,7 @@ async fn execute_tool(
         .await
         .map_err(|e| e.to_string())
 }
+*/
 
 #[tauri::command]
 async fn list_models(
@@ -192,6 +195,125 @@ async fn get_models_directory(
     Ok(path.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+async fn get_gpu_info(
+    state: State<'_, Arc<AppState>>,
+) -> Result<String, String> {
+    let engine = state.llm_engine.read().await;
+    Ok(engine.gpu_info())
+}
+
+#[tauri::command]
+async fn detect_gpu(
+) -> Result<(bool, String), String> {
+    let (available, info) = LLMEngine::detect_gpu_config();
+    Ok((available, info))
+}
+
+#[tauri::command]
+async fn update_gpu_settings(
+    state: State<'_, Arc<AppState>>,
+    use_gpu: bool,
+    n_gpu_layers: Option<u32>,
+) -> Result<String, String> {
+    info!("Updating GPU settings: use_gpu={}, n_gpu_layers={:?}", use_gpu, n_gpu_layers);
+    
+    let mut engine = state.llm_engine.write().await;
+    engine.config.use_gpu = use_gpu;
+    
+    if let Some(layers) = n_gpu_layers {
+        engine.config.n_gpu_layers = layers;
+    }
+    
+    Ok("GPU settings updated successfully".to_string())
+}
+
+// ===== Commandes Hugging Face =====
+
+#[tauri::command]
+async fn hf_search_models(
+    state: State<'_, Arc<AppState>>,
+    search_query: Option<String>,
+    author: Option<String>,
+    task: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<huggingface::Model>, String> {
+    info!("Searching HuggingFace models");
+    
+    let mut params = ModelSearchParams::new();
+    
+    if let Some(query) = search_query {
+        params = params.search(&query);
+    }
+    if let Some(author) = author {
+        params = params.author(&author);
+    }
+    if let Some(task) = task {
+        params = params.task(&task);
+    }
+    if let Some(limit) = limit {
+        params = params.limit(limit);
+    } else {
+        params = params.limit(20); // Default limit
+    }
+    
+    let client = state.hf_client.read().await;
+    client.search_models(params)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn hf_get_model_info(
+    state: State<'_, Arc<AppState>>,
+    repo_id: String,
+) -> Result<HFModelInfo, String> {
+    info!("Fetching HuggingFace model info: {}", repo_id);
+    
+    let client = state.hf_client.read().await;
+    client.get_model_info(&repo_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn hf_download_model(
+    state: State<'_, Arc<AppState>>,
+    repo_id: String,
+    filename: String,
+    revision: Option<String>,
+) -> Result<String, String> {
+    info!("Downloading {} from {}", filename, repo_id);
+    
+    let models_dir = state.model_manager.models_directory();
+    let output_path = models_dir.join(&filename);
+    
+    let client = state.hf_client.read().await;
+    let result_path = client.download_file(
+        &repo_id,
+        &filename,
+        revision.as_deref(),
+        output_path,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    
+    Ok(result_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn hf_set_token(
+    state: State<'_, Arc<AppState>>,
+    token: String,
+) -> Result<String, String> {
+    info!("Setting HuggingFace token");
+    
+    let mut client = state.hf_client.write().await;
+    client.set_token(token);
+    
+    Ok("Token set successfully".to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialiser le logging
@@ -219,51 +341,38 @@ pub fn run() {
                 }
             };
 
-            let context_manager = Arc::new(ContextManager::new());
-            let mcp_server = Arc::new(MCPServer::new(3000));
-
-            // Enregistrer les outils additionnels
-            let registry = mcp_server.tool_registry();
-            tauri::async_runtime::spawn(async move {
-                let mut reg = registry.write().await;
-                let _ = reg.register_tool(create_file_reader_tool());
-                let _ = reg.register_tool(create_file_writer_tool());
-                info!("Outils MCP enregistrés");
-            });
-
-            // Démarrer le serveur MCP dans une tâche asynchrone
-            let mcp_server_clone = Arc::clone(&mcp_server);
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = mcp_server_clone.start().await {
-                    error!("Erreur du serveur MCP: {}", e);
-                }
-            });
-
+            // Initialize HuggingFace client
+            let hf_client = Arc::new(RwLock::new(
+                HuggingFaceClient::new().map_err(|e| {
+                    error!("Failed to initialize HuggingFace client: {}", e);
+                    e
+                })?
+            ));
+            
             // Créer l'état global
             let app_state = Arc::new(AppState {
                 llm_engine,
-                context_manager,
-                mcp_server,
                 model_manager,
+                hf_client,
             });
-
+            
             app.manage(app_state);
-
+            
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             initialize_llm,
             generate_response,
-            create_session,
-            add_message,
-            get_session,
-            list_sessions,
-            delete_session,
-            list_tools,
-            execute_tool,
             list_models,
             delete_model,
             get_models_directory,
+            get_gpu_info,
+            detect_gpu,
+            update_gpu_settings,
+            hf_search_models,
+            hf_get_model_info,
+            hf_download_model,
+            hf_set_token,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

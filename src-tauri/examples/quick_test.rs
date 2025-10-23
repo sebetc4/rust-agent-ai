@@ -1,5 +1,4 @@
 use agents_rs_lib::llm::{LLMEngine, config::LLMConfig};
-use std::path::PathBuf;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -8,7 +7,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = LLMConfig {
-        model_path: PathBuf::from("models/Qwen3-1.7B-IQ4_XS.gguf"),
+        model_path: "models/Qwen3-1.7B-IQ4_XS.gguf".to_string(),
         n_ctx: 2048,
         n_threads: 4,
         temperature: 0.7,
@@ -16,6 +15,10 @@ async fn main() -> anyhow::Result<()> {
         top_k: 40,
         repeat_penalty: 1.1,
         max_tokens: 50,
+        context_size: 2048,  // Added missing field
+        use_gpu: false,      // Set to false since GPU features are disabled
+        n_gpu_layers: u32::MAX,  // Use maximum value for all GPU layers
+        main_gpu: 0,
     };
 
     println!("🚀 Loading model...");

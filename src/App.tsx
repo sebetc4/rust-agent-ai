@@ -1,14 +1,18 @@
 import "./index.css";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { MessageList } from "@/components/chat/MessageList";
 import { useChatStore } from "@/stores/chat";
 import { useLLMStore } from "@/stores/llm";
-import { Loader2, AlertCircle } from "lucide-react";
+import { Loader2, AlertCircle, MessageSquare, Download } from "lucide-react";
+import { HuggingFace } from "@/pages/HuggingFace";
+
+type Page = 'chat' | 'huggingface';
 
 function App() {
+  const [currentPage, setCurrentPage] = useState<Page>('chat');
   const { messages, isLoading, error, sendMessage } = useChatStore();
   const { isModelLoaded, isLoading: isModelLoading, error: modelError, loadModel } = useLLMStore();
 
@@ -61,16 +65,54 @@ function App() {
     );
   }
 
+  // Render different pages
+  if (currentPage === 'huggingface') {
+    return (
+      <div className="min-h-screen bg-background">
+        <nav className="border-b bg-card">
+          <div className="max-w-7xl mx-auto px-4 py-3 flex gap-2">
+            <Button
+              variant="ghost"
+              onClick={() => setCurrentPage('chat')}
+            >
+              <MessageSquare className="h-4 w-4 mr-2" />
+              Chat
+            </Button>
+            <Button
+              variant="default"
+              onClick={() => setCurrentPage('huggingface')}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Hugging Face
+            </Button>
+          </div>
+        </nav>
+        <HuggingFace />
+      </div>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-background p-4">
       <div className="max-w-4xl mx-auto h-[calc(100vh-2rem)]">
         <Card className="h-full flex flex-col">
           {/* Header */}
           <div className="border-b p-4">
-            <h1 className="text-2xl font-semibold">Chat Interface</h1>
-            <p className="text-sm text-muted-foreground">
-              {isModelLoaded ? "Model loaded • Ready to chat" : "Initializing..."}
-            </p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-2xl font-semibold">Chat Interface</h1>
+                <p className="text-sm text-muted-foreground">
+                  {isModelLoaded ? "Model loaded • Ready to chat" : "Initializing..."}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                onClick={() => setCurrentPage('huggingface')}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Download Models
+              </Button>
+            </div>
           </div>
 
           {/* Messages Area */}

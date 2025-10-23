@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use llama_cpp_2::{
     llama_backend::LlamaBackend,
     llama_batch::LlamaBatch,
-    model::{AddBos, LlamaModel},
+    model::{AddBos, LlamaModel, params::LlamaModelParams},
     sampling::LlamaSampler,
 };
 use serde::{Deserialize, Serialize};
@@ -73,30 +73,84 @@ impl LLMEngine {
         }
         
         // Check if model file exists
-        if !self.config.model_path.exists() {
+        let model_path = std::path::Path::new(&self.config.model_path);
+        if !model_path.exists() {
             anyhow::bail!(
                 "Model file not found: {}",
-                self.config.model_path.display()
+                model_path.display()
             );
         }
 
-        info!("Loading model from: {}", self.config.model_path.display());
+        info!("Loading model from: {}", model_path.display());
         
-        // Load the model with default parameters
+        // Configure model parameters with GPU settings
+        let mut model_params = LlamaModelParams::default();
+        
+        if self.config.use_gpu {
+            info!("GPU acceleration enabled");
+            info!("GPU layers: {}", if self.config.n_gpu_layers == u32::MAX { "all".to_string() } else { self.config.n_gpu_layers.to_string() });
+            info!("Main GPU: {}", self.config.main_gpu);
+            
+            model_params = model_params
+                .with_n_gpu_layers(self.config.n_gpu_layers)
+                .with_main_gpu(self.config.main_gpu);
+        } else {
+            info!("GPU acceleration disabled - using CPU only");
+            model_params = model_params.with_n_gpu_layers(0);
+        }
+        
+        // Load the model with GPU parameters
         let model = LlamaModel::load_from_file(
             &self.backend,
             &self.config.model_path,
-            &Default::default(),
+            &model_params,
         )
         .context("Failed to load GGUF model")?;
         
         info!("Model loaded successfully!");
         info!("Context size: {} tokens", self.config.n_ctx);
         info!("Threads: {}", self.config.n_threads);
+        info!("GPU info: {}", self.gpu_info());
         
         *model_lock = Some(ModelWrapper(model));
         
         Ok(())
+    }
+
+    /// Detect GPU availability and return recommended configuration
+    pub fn detect_gpu_config() -> (bool, String) {
+        // Check for NVIDIA GPU (CUDA)
+        #[cfg(feature = "cuda")]
+        {
+            // This would ideally check nvidia-smi or CUDA runtime
+            // For now, we assume CUDA is available if compiled with cuda feature
+            return (true, "CUDA GPU detected".to_string());
+        }
+        
+        // Check for Apple Silicon (Metal)
+        #[cfg(all(target_os = "macos", feature = "metal"))]
+        {
+            // Check if we're on Apple Silicon
+            if std::env::consts::ARCH == "aarch64" {
+                return (true, "Apple Silicon Metal GPU detected".to_string());
+            }
+        }
+        
+        // Fallback to CPU
+        (false, "No GPU acceleration available - using CPU".to_string())
+    }
+
+    /// Get GPU information and recommendations
+    pub fn gpu_info(&self) -> String {
+        let (has_gpu, info) = Self::detect_gpu_config();
+        
+        if self.config.use_gpu && has_gpu {
+            format!("GPU: Enabled - {}", info)
+        } else if self.config.use_gpu && !has_gpu {
+            format!("GPU: Requested but not available - {}", info)
+        } else {
+            format!("GPU: Disabled - {}", info)
+        }
     }
 
     /// Check if model is currently loaded
