@@ -17,6 +17,7 @@ dist-ssr
 !.vscode/extensions.json
 .github/copilot-instructions.md
 .github/agent-context/*
+.github/todo/*
 .idea
 .DS_Store
 *.suo

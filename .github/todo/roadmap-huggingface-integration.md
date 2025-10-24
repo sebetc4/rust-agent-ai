@@ -92,6 +92,82 @@ src/
   }
   ```
 
+#### 1.4 GGUF Model Discovery Filter
+- **Objective**: Retrieve only repositories containing GGUF format models
+
+- **Implementation Strategy**
+  ```rust
+  // Use HF API with library filter
+  // GET https://huggingface.co/api/models?library=gguf&full=true
+  
+  impl HuggingFaceClient {
+      pub async fn discover_gguf_models(&self, params: HFSearchParams) -> Result<Vec<GGUFModelInfo>> {
+          // 1. Call API with library=gguf filter
+          // 2. Validate metadata contains library_name == "gguf" OR "gguf" in tags
+          // 3. Inspect siblings field to verify at least one .gguf file exists
+          // 4. Filter out repos without actual .gguf files
+      }
+  }
+  
+  pub struct GGUFModelInfo {
+      pub repo_id: String,
+      pub gguf_files: Vec<GGUFFile>,
+      pub downloads: u64,
+      pub likes: u32,
+      pub author: String,
+      pub task: Option<String>,
+  }
+  
+  pub struct GGUFFile {
+      pub filename: String,
+      pub size: u64,
+      pub quantization: Option<String>, // e.g., "q4_0", "q8_0"
+  }
+  ```
+
+- **Validation Rules**
+  - Verify `library_name == "gguf"` in metadata
+  - Check `siblings` array for files ending with `.gguf`
+  - Discard repos without any `.gguf` files
+  - Parse quantization level from filename if possible
+
+- **Output Format**
+  ```json
+  [
+    {
+      "repo_id": "TheBloke/Llama-2-7B-GGUF",
+      "gguf_files": [
+        {
+          "filename": "llama-2-7b.Q4_0.gguf",
+          "size": 3825682432,
+          "quantization": "Q4_0"
+        },
+        {
+          "filename": "llama-2-7b.Q8_0.gguf",
+          "size": 7167954944,
+          "quantization": "Q8_0"
+        }
+      ],
+      "downloads": 1234567,
+      "likes": 250,
+      "author": "TheBloke",
+      "task": "text-generation"
+    }
+  ]
+  ```
+
+- **Error Handling**
+  - Rate limiting (429): Implement exponential backoff
+  - Missing metadata: Log warning, skip entry
+  - Network errors: Retry with configurable attempts
+  - Pagination: Handle `Link` headers for large result sets
+
+- **Additional Features**
+  - Cache results locally (TTL: 1 hour)
+  - Background refresh capability
+  - Filter by quantization level (Q4, Q5, Q8, etc.)
+  - Sort by downloads/likes/size
+
 #### 1.2 Download Manager
 - **Download with Progress Tracking**
   ```rust

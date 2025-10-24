@@ -1,12 +1,17 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import type { HFModel, HFModelInfo, HFSearchParams } from '@/types';
+import type { HFModel, HFModelInfo, HFSearchParams, GGUFModelInfo } from '@/types';
 
 interface HuggingFaceState {
   // Search state
   searchResults: HFModel[];
   isSearching: boolean;
   searchError: string | null;
+
+  // GGUF discovery state
+  ggufModels: GGUFModelInfo[];
+  isDiscoveringGGUF: boolean;
+  ggufDiscoveryError: string | null;
 
   // Model info state
   selectedModel: HFModelInfo | null;
@@ -23,6 +28,7 @@ interface HuggingFaceState {
 
   // Actions
   searchModels: (params: HFSearchParams) => Promise<void>;
+  discoverGGUFModels: (params?: HFSearchParams) => Promise<void>;
   getModelInfo: (repoId: string) => Promise<void>;
   downloadModel: (repoId: string, filename: string, revision?: string) => Promise<string>;
   setToken: (token: string) => Promise<void>;
@@ -35,6 +41,10 @@ export const useHuggingFaceStore = create<HuggingFaceState>((set, get) => ({
   searchResults: [],
   isSearching: false,
   searchError: null,
+
+  ggufModels: [],
+  isDiscoveringGGUF: false,
+  ggufDiscoveryError: null,
 
   selectedModel: null,
   isLoadingInfo: false,
@@ -62,6 +72,29 @@ export const useHuggingFaceStore = create<HuggingFaceState>((set, get) => ({
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       set({ searchError: errorMessage, isSearching: false, searchResults: [] });
+      throw error;
+    }
+  },
+
+  // Discover GGUF models
+  discoverGGUFModels: async (params?: HFSearchParams) => {
+    set({ isDiscoveringGGUF: true, ggufDiscoveryError: null });
+
+    try {
+      const results = await invoke<GGUFModelInfo[]>('hf_discover_gguf_models', {
+        searchQuery: params?.search,
+        author: params?.author,
+        task: params?.task,
+        sort: params?.sort,
+        limit: params?.limit || 20,
+      });
+
+      console.log(`[HF Store] Discovered ${results.length} GGUF models`);
+      set({ ggufModels: results, isDiscoveringGGUF: false });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('[HF Store] Failed to discover GGUF models:', errorMessage);
+      set({ ggufDiscoveryError: errorMessage, isDiscoveringGGUF: false, ggufModels: [] });
       throw error;
     }
   },

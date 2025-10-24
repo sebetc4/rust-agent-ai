@@ -115,6 +115,51 @@ pub struct ModelInfo {
     pub library_name: Option<String>,
 }
 
+/// GGUF file information with quantization details
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GGUFFile {
+    pub filename: String,
+    pub size: u64,
+    pub quantization: Option<String>,
+}
+
+impl GGUFFile {
+    /// Extract quantization level from filename (e.g., "Q4_0", "Q8_0")
+    pub fn extract_quantization(filename: &str) -> Option<String> {
+        // Common GGUF quantization patterns: Q4_0, Q4_K_M, Q5_K_S, Q8_0, etc.
+        let patterns = [
+            r"[Qq]4_0", r"[Qq]4_1", r"[Qq]4_[Kk]_[MmSs]",
+            r"[Qq]5_0", r"[Qq]5_1", r"[Qq]5_[Kk]_[MmSs]",
+            r"[Qq]6_[Kk]", r"[Qq]8_0",
+            r"[Ff]16", r"[Ff]32",
+        ];
+        
+        for pattern in &patterns {
+            if let Some(start) = filename.to_lowercase().find(&pattern.to_lowercase().replace("\\", "")) {
+                let end = start + pattern.len();
+                if end <= filename.len() {
+                    return Some(filename[start..end].to_uppercase());
+                }
+            }
+        }
+        
+        None
+    }
+}
+
+/// GGUF model information with filtered files
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GGUFModelInfo {
+    pub repo_id: String,
+    pub gguf_files: Vec<GGUFFile>,
+    pub downloads: u64,
+    pub likes: u64,
+    pub author: String,
+    pub task: Option<String>,
+    pub tags: Vec<String>,
+    pub last_modified: String,
+}
+
 /// Parameters for searching models
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ModelSearchParams {
@@ -170,12 +215,12 @@ impl ModelSearchParams {
     }
 
     pub fn descending(mut self) -> Self {
-        self.direction = Some("desc".to_string());
+        self.direction = Some("-1".to_string());
         self
     }
 
     pub fn ascending(mut self) -> Self {
-        self.direction = Some("asc".to_string());
+        self.direction = Some("1".to_string());
         self
     }
 

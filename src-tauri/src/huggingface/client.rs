@@ -2,9 +2,9 @@ use anyhow::{anyhow, Context, Result};
 use reqwest::{Client, Response};
 use serde::de::DeserializeOwned;
 use std::path::PathBuf;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
-use super::models::{Model, ModelInfo, ModelSearchParams};
+use super::models::{GGUFFile, GGUFModelInfo, Model, ModelInfo, ModelSearchParams};
 
 const HF_API_BASE: &str = "https://huggingface.co";
 const HF_API_MODELS: &str = "https://huggingface.co/api/models";
@@ -247,6 +247,136 @@ impl HuggingFaceClient {
 
         info!("Successfully downloaded file to {:?}", output_path);
         Ok(output_path)
+    }
+
+    /// Discover models with GGUF files only
+    pub async fn discover_gguf_models(
+        &self,
+        mut params: ModelSearchParams,
+    ) -> Result<Vec<GGUFModelInfo>> {
+        debug!("Discovering GGUF models with params: {:?}", params);
+
+        // Build search query to include "gguf" keyword
+        let search_query = if let Some(existing_search) = params.search {
+            format!("{} gguf", existing_search)
+        } else {
+            "gguf".to_string()
+        };
+        
+        params.search = Some(search_query);
+        params.full = Some(true);
+
+        let mut request = self.client.get(HF_API_MODELS);
+
+        // Add query parameters
+        request = request.query(&[("search", params.search.as_ref().unwrap())]);
+        
+        if let Some(author) = &params.author {
+            request = request.query(&[("author", author)]);
+        }
+        if let Some(task) = &params.task {
+            request = request.query(&[("task", task)]);
+        }
+        request = request.query(&[("full", "true")]);
+        
+        if let Some(sort) = &params.sort {
+            request = request.query(&[("sort", sort)]);
+        }
+        if let Some(direction) = &params.direction {
+            request = request.query(&[("direction", direction)]);
+        }
+        // Request more to compensate for filtering
+        let api_limit = params.limit.unwrap_or(20) * 3; // 3x to get enough after filtering
+        request = request.query(&[("limit", api_limit.to_string())]);
+
+        // Add authentication if available
+        if let Some(token) = &self.token {
+            request = request.header("Authorization", format!("Bearer {}", token));
+        }
+
+        let response = request
+            .send()
+            .await
+            .context("Failed to send request to Hugging Face API")?;
+
+        let models: Vec<Model> = self.handle_response(response).await?;
+        
+        info!("Found {} potential GGUF models", models.len());
+
+        // Filter and transform to GGUFModelInfo
+        let mut gguf_models = Vec::new();
+
+        for model in models {
+            // Validate library_name or tags contain "gguf"
+            let has_gguf_library = model
+                .library_name
+                .as_ref()
+                .map(|lib| lib.to_lowercase() == "gguf")
+                .unwrap_or(false);
+
+            let has_gguf_tag = model.tags.iter().any(|tag| tag.to_lowercase() == "gguf");
+
+            if !has_gguf_library && !has_gguf_tag {
+                debug!("Skipping {} - no gguf library or tag", model.model_id);
+                continue;
+            }
+
+            // Fetch detailed model info to get siblings
+            let model_info = match self.get_model_info(&model.model_id).await {
+                Ok(info) => info,
+                Err(e) => {
+                    warn!("Failed to get info for {}: {}", model.model_id, e);
+                    continue;
+                }
+            };
+
+            // Filter for .gguf files
+            let gguf_files: Vec<GGUFFile> = model_info
+                .siblings
+                .iter()
+                .filter(|file| {
+                    file.filename.to_lowercase().ends_with(".gguf")
+                })
+                .map(|file| GGUFFile {
+                    filename: file.filename.clone(),
+                    size: file.size.unwrap_or(0),
+                    quantization: GGUFFile::extract_quantization(&file.filename),
+                })
+                .collect();
+
+            // Skip if no .gguf files found
+            if gguf_files.is_empty() {
+                debug!("Skipping {} - no .gguf files found", model.model_id);
+                continue;
+            }
+
+            info!(
+                "Found {} with {} GGUF files",
+                model.model_id,
+                gguf_files.len()
+            );
+
+            gguf_models.push(GGUFModelInfo {
+                repo_id: model.model_id,
+                gguf_files,
+                downloads: model.downloads.unwrap_or(0),
+                likes: model.likes.unwrap_or(0),
+                author: model.author.unwrap_or_else(|| "Unknown".to_string()),
+                task: model.pipeline_tag,
+                tags: model.tags,
+                last_modified: model.last_modified.unwrap_or_else(|| "Unknown".to_string()),
+            });
+        }
+
+        info!("Discovered {} models with GGUF files", gguf_models.len());
+        
+        // Apply limit after filtering
+        let final_limit = params.limit.unwrap_or(20) as usize;
+        if gguf_models.len() > final_limit {
+            gguf_models.truncate(final_limit);
+        }
+        
+        Ok(gguf_models)
     }
 
     /// Handle API response and deserialize JSON

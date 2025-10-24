@@ -7,23 +7,20 @@ import { MessageList } from "@/components/chat/MessageList";
 import { useChatStore } from "@/stores/chat";
 import { useLLMStore } from "@/stores/llm";
 import { Loader2, AlertCircle, MessageSquare, Download } from "lucide-react";
-import { HuggingFace } from "@/pages/HuggingFace";
+import { Models } from "@/pages/Models";
 
-type Page = 'chat' | 'huggingface';
+type Page = 'chat' | 'models';
 
 function App() {
-  const [currentPage, setCurrentPage] = useState<Page>('chat');
+  const [currentPage, setCurrentPage] = useState<Page>('models');
   const { messages, isLoading, error, sendMessage } = useChatStore();
   const { isModelLoaded, isLoading: isModelLoading, error: modelError, loadModel } = useLLMStore();
 
-  // Load model on startup
   useEffect(() => {
-    // Default model name (file name without path)
     const modelName = "Qwen3-1.7B-IQ4_XS.gguf";
     loadModel(modelName);
   }, [loadModel]);
 
-  // Show loading state while model is loading
   if (isModelLoading) {
     return (
       <main className="min-h-screen bg-background flex items-center justify-center">
@@ -31,16 +28,13 @@ function App() {
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
           <div className="text-center">
             <h2 className="text-lg font-semibold">Loading Model</h2>
-            <p className="text-sm text-muted-foreground">
-              Initializing Qwen3-1.7B...
-            </p>
+            <p className="text-sm text-muted-foreground">Initializing Qwen3-1.7B...</p>
           </div>
         </Card>
       </main>
     );
   }
 
-  // Show error if model failed to load
   if (modelError) {
     return (
       <main className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -49,13 +43,8 @@ function App() {
             <AlertCircle className="h-6 w-6 text-destructive flex-shrink-0 mt-0.5" />
             <div className="flex-1">
               <h2 className="text-lg font-semibold mb-2">Model Loading Failed</h2>
-              <p className="text-sm text-muted-foreground mb-4">
-                {modelError}
-              </p>
-              <Button 
-                onClick={() => loadModel("Qwen3-1.7B-IQ4_XS.gguf")}
-                variant="outline"
-              >
+              <p className="text-sm text-muted-foreground mb-4">{modelError}</p>
+              <Button onClick={() => loadModel("Qwen3-1.7B-IQ4_XS.gguf")} variant="outline">
                 Retry
               </Button>
             </div>
@@ -65,29 +54,22 @@ function App() {
     );
   }
 
-  // Render different pages
-  if (currentPage === 'huggingface') {
+  if (currentPage === 'models') {
     return (
       <div className="min-h-screen bg-background">
         <nav className="border-b bg-card">
           <div className="max-w-7xl mx-auto px-4 py-3 flex gap-2">
-            <Button
-              variant="ghost"
-              onClick={() => setCurrentPage('chat')}
-            >
+            <Button variant="ghost" onClick={() => setCurrentPage('chat')}>
               <MessageSquare className="h-4 w-4 mr-2" />
               Chat
             </Button>
-            <Button
-              variant="default"
-              onClick={() => setCurrentPage('huggingface')}
-            >
+            <Button variant="default" onClick={() => setCurrentPage('models')}>
               <Download className="h-4 w-4 mr-2" />
-              Hugging Face
+              Models
             </Button>
           </div>
         </nav>
-        <HuggingFace />
+        <Models />
       </div>
     );
   }
@@ -96,7 +78,6 @@ function App() {
     <main className="min-h-screen bg-background p-4">
       <div className="max-w-4xl mx-auto h-[calc(100vh-2rem)]">
         <Card className="h-full flex flex-col">
-          {/* Header */}
           <div className="border-b p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -105,37 +86,26 @@ function App() {
                   {isModelLoaded ? "Model loaded • Ready to chat" : "Initializing..."}
                 </p>
               </div>
-              <Button
-                variant="outline"
-                onClick={() => setCurrentPage('huggingface')}
-              >
+              <Button variant="outline" onClick={() => setCurrentPage('models')}>
                 <Download className="h-4 w-4 mr-2" />
-                Download Models
+                Models
               </Button>
             </div>
           </div>
-
-          {/* Messages Area */}
           <div className="flex-1 overflow-hidden">
             <MessageList messages={messages} />
           </div>
-
-          {/* Loading Indicator */}
           {isLoading && (
             <div className="px-4 py-2 flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
               <span>Generating response...</span>
             </div>
           )}
-
-          {/* Error Display */}
           {error && (
             <div className="px-4 py-2 bg-destructive/10 text-destructive text-sm">
               Error: {error}
             </div>
           )}
-
-          {/* Input Area */}
           <div className="border-t p-4">
             <ChatInput onSend={sendMessage} disabled={isLoading || !isModelLoaded} />
           </div>

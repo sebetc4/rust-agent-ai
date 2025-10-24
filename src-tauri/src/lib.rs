@@ -314,6 +314,46 @@ async fn hf_set_token(
     Ok("Token set successfully".to_string())
 }
 
+#[tauri::command]
+async fn hf_discover_gguf_models(
+    state: State<'_, Arc<AppState>>,
+    search_query: Option<String>,
+    author: Option<String>,
+    task: Option<String>,
+    sort: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<huggingface::GGUFModelInfo>, String> {
+    info!("Discovering GGUF models from HuggingFace");
+    
+    let mut params = ModelSearchParams::new();
+    
+    if let Some(query) = search_query {
+        params = params.search(&query);
+    }
+    if let Some(author) = author {
+        params = params.author(&author);
+    }
+    if let Some(task) = task {
+        params = params.task(&task);
+    }
+    if let Some(sort) = sort {
+        params.sort = Some(sort);
+    }
+    if let Some(limit) = limit {
+        params = params.limit(limit);
+    } else {
+        params = params.limit(20); // Default limit
+    }
+    
+    let client = state.hf_client.read().await;
+    client.discover_gguf_models(params)
+        .await
+        .map_err(|e| {
+            error!("Failed to discover GGUF models: {}", e);
+            e.to_string()
+        })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialiser le logging
@@ -373,6 +413,7 @@ pub fn run() {
             hf_get_model_info,
             hf_download_model,
             hf_set_token,
+            hf_discover_gguf_models,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
