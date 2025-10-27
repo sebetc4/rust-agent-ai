@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import type { HFModel, HFModelInfo, HFSearchParams, GGUFModelInfo } from '@/types';
+import { listen } from '@tauri-apps/api/event';
+import type { HFModel, HFModelInfo, HFSearchParams, GGUFModelMetadata, GGUFFile } from '@/types';
 
 interface HuggingFaceState {
   // Search state
@@ -9,9 +10,14 @@ interface HuggingFaceState {
   searchError: string | null;
 
   // GGUF discovery state
-  ggufModels: GGUFModelInfo[];
+  ggufModels: GGUFModelMetadata[];
   isDiscoveringGGUF: boolean;
   ggufDiscoveryError: string | null;
+
+  // Selected model GGUF files
+  selectedModelFiles: GGUFFile[];
+  isLoadingFiles: boolean;
+  filesError: string | null;
 
   // Model info state
   selectedModel: HFModelInfo | null;
@@ -29,6 +35,7 @@ interface HuggingFaceState {
   // Actions
   searchModels: (params: HFSearchParams) => Promise<void>;
   discoverGGUFModels: (params?: HFSearchParams) => Promise<void>;
+  getGGUFFiles: (repoId: string) => Promise<void>;
   getModelInfo: (repoId: string) => Promise<void>;
   downloadModel: (repoId: string, filename: string, revision?: string) => Promise<string>;
   setToken: (token: string) => Promise<void>;
@@ -36,7 +43,7 @@ interface HuggingFaceState {
   clearSelectedModel: () => void;
 }
 
-export const useHuggingFaceStore = create<HuggingFaceState>((set, get) => ({
+export const useHuggingFaceStore = create<HuggingFaceState>((set) => ({
   // Initial state
   searchResults: [],
   isSearching: false,
@@ -45,6 +52,10 @@ export const useHuggingFaceStore = create<HuggingFaceState>((set, get) => ({
   ggufModels: [],
   isDiscoveringGGUF: false,
   ggufDiscoveryError: null,
+
+  selectedModelFiles: [],
+  isLoadingFiles: false,
+  filesError: null,
 
   selectedModel: null,
   isLoadingInfo: false,
@@ -81,7 +92,7 @@ export const useHuggingFaceStore = create<HuggingFaceState>((set, get) => ({
     set({ isDiscoveringGGUF: true, ggufDiscoveryError: null });
 
     try {
-      const results = await invoke<GGUFModelInfo[]>('hf_discover_gguf_models', {
+      const results = await invoke<GGUFModelMetadata[]>('hf_discover_gguf_models', {
         searchQuery: params?.search,
         author: params?.author,
         task: params?.task,
@@ -95,6 +106,23 @@ export const useHuggingFaceStore = create<HuggingFaceState>((set, get) => ({
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error('[HF Store] Failed to discover GGUF models:', errorMessage);
       set({ ggufDiscoveryError: errorMessage, isDiscoveringGGUF: false, ggufModels: [] });
+      throw error;
+    }
+  },
+
+  // Get GGUF files for a model
+  getGGUFFiles: async (repoId: string) => {
+    console.log('[HF Store] Getting GGUF files for:', repoId);
+    set({ isLoadingFiles: true, filesError: null });
+
+    try {
+      const files = await invoke<GGUFFile[]>('hf_get_gguf_files', { repoId });
+      console.log(`[HF Store] Received ${files.length} GGUF files`);
+      set({ selectedModelFiles: files, isLoadingFiles: false });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('[HF Store] Failed to get GGUF files:', errorMessage);
+      set({ filesError: errorMessage, isLoadingFiles: false, selectedModelFiles: [] });
       throw error;
     }
   },
@@ -120,6 +148,20 @@ export const useHuggingFaceStore = create<HuggingFaceState>((set, get) => ({
   downloadModel: async (repoId: string, filename: string, revision?: string) => {
     set({ isDownloading: true, downloadError: null, downloadProgress: 0 });
 
+    // Listen for progress events
+    const unlisten = await listen<{
+      repo_id: string;
+      filename: string;
+      downloaded: number;
+      total: number | null;
+      progress: number;
+    }>('download-progress', (event) => {
+      // Only update if it's for our download
+      if (event.payload.repo_id === repoId && event.payload.filename === filename) {
+        set({ downloadProgress: event.payload.progress });
+      }
+    });
+
     try {
       const path = await invoke<string>('hf_download_model', {
         repoId,
@@ -128,10 +170,12 @@ export const useHuggingFaceStore = create<HuggingFaceState>((set, get) => ({
       });
 
       set({ isDownloading: false, downloadProgress: 100 });
+      unlisten(); // Clean up listener
       return path;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       set({ downloadError: errorMessage, isDownloading: false, downloadProgress: 0 });
+      unlisten(); // Clean up listener
       throw error;
     }
   },

@@ -12,7 +12,7 @@ import { Models } from "@/pages/Models";
 type Page = 'chat' | 'models';
 
 function App() {
-  const [currentPage, setCurrentPage] = useState<Page>('models');
+  const [currentPage, setCurrentPage] = useState<Page>('chat');
   const { messages, isLoading, error, sendMessage } = useChatStore();
   const { isModelLoaded, isLoading: isModelLoading, error: modelError, loadModel } = useLLMStore();
 

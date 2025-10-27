@@ -90,6 +90,24 @@ pub struct ModelFileLfs {
     pub pointer_size: Option<u64>,
 }
 
+/// File tree entry from /tree/main endpoint
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TreeEntry {
+    pub path: String,
+    #[serde(rename = "type")]
+    pub entry_type: String,
+    pub size: Option<u64>,
+    pub lfs: Option<TreeLfs>,
+}
+
+/// LFS information in tree endpoint
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TreeLfs {
+    pub size: u64,
+    pub sha256: Option<String>,
+    pub pointer_size: Option<u64>,
+}
+
 /// Detailed model information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelInfo {
@@ -158,6 +176,32 @@ pub struct GGUFModelInfo {
     pub task: Option<String>,
     pub tags: Vec<String>,
     pub last_modified: String,
+}
+
+/// GGUF model metadata (without files, for search results)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GGUFModelMetadata {
+    pub repo_id: String,
+    pub downloads: u64,
+    pub likes: u64,
+    pub author: String,
+    pub task: Option<String>,
+    pub tags: Vec<String>,
+    pub last_modified: String,
+}
+
+impl From<GGUFModelInfo> for GGUFModelMetadata {
+    fn from(info: GGUFModelInfo) -> Self {
+        Self {
+            repo_id: info.repo_id,
+            downloads: info.downloads,
+            likes: info.likes,
+            author: info.author,
+            task: info.task,
+            tags: info.tags,
+            last_modified: info.last_modified,
+        }
+    }
 }
 
 /// Parameters for searching models

@@ -2,9 +2,9 @@ use anyhow::{anyhow, Context, Result};
 use reqwest::{Client, Response};
 use serde::de::DeserializeOwned;
 use std::path::PathBuf;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
-use super::models::{GGUFFile, GGUFModelInfo, Model, ModelInfo, ModelSearchParams};
+use super::models::{GGUFFile, GGUFModelMetadata, Model, ModelInfo, ModelSearchParams, TreeEntry};
 
 const HF_API_BASE: &str = "https://huggingface.co";
 const HF_API_MODELS: &str = "https://huggingface.co/api/models";
@@ -112,6 +112,26 @@ impl HuggingFaceClient {
             .send()
             .await
             .context("Failed to fetch model info")?;
+
+        self.handle_response(response).await
+    }
+
+    /// Get file tree from a repository (includes file sizes)
+    pub async fn get_file_tree(&self, repo_id: &str) -> Result<Vec<TreeEntry>> {
+        debug!("Fetching file tree for: {}", repo_id);
+
+        let url = format!("{}/api/models/{}/tree/main", HF_API_BASE, repo_id);
+        let mut request = self.client.get(&url);
+
+        // Add authentication if available
+        if let Some(token) = &self.token {
+            request = request.header("Authorization", format!("Bearer {}", token));
+        }
+
+        let response = request
+            .send()
+            .await
+            .context("Failed to fetch file tree")?;
 
         self.handle_response(response).await
     }
@@ -227,21 +247,26 @@ impl HuggingFaceClient {
                 .context("Failed to create output directory")?;
         }
 
-        // Download with progress tracking
+        // Download with progress tracking (streaming)
         use tokio::io::AsyncWriteExt;
+        use futures::StreamExt;
 
         let mut file = tokio::fs::File::create(&output_path)
             .await
             .context("Failed to create output file")?;
 
-        let bytes = response.bytes().await.context("Failed to read response bytes")?;
-        
-        file.write_all(&bytes)
-            .await
-            .context("Failed to write file")?;
-        
-        let downloaded = bytes.len() as u64;
-        progress_callback(downloaded, total_size);
+        let mut stream = response.bytes_stream();
+        let mut downloaded: u64 = 0;
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.context("Failed to read chunk")?;
+            file.write_all(&chunk)
+                .await
+                .context("Failed to write chunk")?;
+            
+            downloaded += chunk.len() as u64;
+            progress_callback(downloaded, total_size);
+        }
 
         file.flush().await.context("Failed to flush file")?;
 
@@ -249,11 +274,11 @@ impl HuggingFaceClient {
         Ok(output_path)
     }
 
-    /// Discover models with GGUF files only
+    /// Discover models with GGUF files only (metadata only, no file details)
     pub async fn discover_gguf_models(
         &self,
         mut params: ModelSearchParams,
-    ) -> Result<Vec<GGUFModelInfo>> {
+    ) -> Result<Vec<GGUFModelMetadata>> {
         debug!("Discovering GGUF models with params: {:?}", params);
 
         // Build search query to include "gguf" keyword
@@ -286,7 +311,7 @@ impl HuggingFaceClient {
             request = request.query(&[("direction", direction)]);
         }
         // Request more to compensate for filtering
-        let api_limit = params.limit.unwrap_or(20) * 3; // 3x to get enough after filtering
+        let api_limit = params.limit.unwrap_or(20) * 2; // 2x to get enough after filtering
         request = request.query(&[("limit", api_limit.to_string())]);
 
         // Add authentication if available
@@ -303,7 +328,7 @@ impl HuggingFaceClient {
         
         info!("Found {} potential GGUF models", models.len());
 
-        // Filter and transform to GGUFModelInfo
+        // Filter and transform to GGUFModelMetadata (no file tree calls)
         let mut gguf_models = Vec::new();
 
         for model in models {
@@ -321,44 +346,10 @@ impl HuggingFaceClient {
                 continue;
             }
 
-            // Fetch detailed model info to get siblings
-            let model_info = match self.get_model_info(&model.model_id).await {
-                Ok(info) => info,
-                Err(e) => {
-                    warn!("Failed to get info for {}: {}", model.model_id, e);
-                    continue;
-                }
-            };
+            info!("Found GGUF model: {}", model.model_id);
 
-            // Filter for .gguf files
-            let gguf_files: Vec<GGUFFile> = model_info
-                .siblings
-                .iter()
-                .filter(|file| {
-                    file.filename.to_lowercase().ends_with(".gguf")
-                })
-                .map(|file| GGUFFile {
-                    filename: file.filename.clone(),
-                    size: file.size.unwrap_or(0),
-                    quantization: GGUFFile::extract_quantization(&file.filename),
-                })
-                .collect();
-
-            // Skip if no .gguf files found
-            if gguf_files.is_empty() {
-                debug!("Skipping {} - no .gguf files found", model.model_id);
-                continue;
-            }
-
-            info!(
-                "Found {} with {} GGUF files",
-                model.model_id,
-                gguf_files.len()
-            );
-
-            gguf_models.push(GGUFModelInfo {
+            gguf_models.push(GGUFModelMetadata {
                 repo_id: model.model_id,
-                gguf_files,
                 downloads: model.downloads.unwrap_or(0),
                 likes: model.likes.unwrap_or(0),
                 author: model.author.unwrap_or_else(|| "Unknown".to_string()),
@@ -368,7 +359,7 @@ impl HuggingFaceClient {
             });
         }
 
-        info!("Discovered {} models with GGUF files", gguf_models.len());
+        info!("Discovered {} models with GGUF", gguf_models.len());
         
         // Apply limit after filtering
         let final_limit = params.limit.unwrap_or(20) as usize;
@@ -377,6 +368,40 @@ impl HuggingFaceClient {
         }
         
         Ok(gguf_models)
+    }
+
+    /// Get GGUF files for a specific model
+    pub async fn get_gguf_files(&self, repo_id: &str) -> Result<Vec<GGUFFile>> {
+        debug!("Fetching GGUF files for: {}", repo_id);
+
+        // Fetch file tree to get accurate file sizes
+        let file_tree = self.get_file_tree(repo_id).await?;
+
+        // Filter for .gguf files and extract sizes
+        let gguf_files: Vec<GGUFFile> = file_tree
+            .iter()
+            .filter(|entry| {
+                entry.entry_type == "file" && entry.path.to_lowercase().ends_with(".gguf")
+            })
+            .map(|entry| {
+                // Get size from LFS if available, otherwise from regular size
+                let size = if let Some(lfs) = &entry.lfs {
+                    lfs.size
+                } else {
+                    entry.size.unwrap_or(0)
+                };
+                
+                GGUFFile {
+                    filename: entry.path.clone(),
+                    size,
+                    quantization: GGUFFile::extract_quantization(&entry.path),
+                }
+            })
+            .collect();
+
+        info!("Found {} GGUF files for {}", gguf_files.len(), repo_id);
+        
+        Ok(gguf_files)
     }
 
     /// Handle API response and deserialize JSON

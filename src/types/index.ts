@@ -108,3 +108,14 @@ export interface GGUFModelInfo {
   tags: string[];
   last_modified: string;
 }
+
+// GGUF model metadata (without files)
+export interface GGUFModelMetadata {
+  repo_id: string;
+  downloads: number;
+  likes: number;
+  author: string;
+  task?: string;
+  tags: string[];
+  last_modified: string;
+}

@@ -7,7 +7,7 @@ pub mod huggingface;
 use llm::{LLMEngine, LLMConfig, ModelManager, ModelInfo};
 use huggingface::{HuggingFaceClient, ModelSearchParams, HFModelInfo};
 
-use tauri::Manager;
+use tauri::{Manager, Emitter};
 use std::sync::Arc;
 use tauri::State;
 use tokio::sync::RwLock;
@@ -278,6 +278,7 @@ async fn hf_get_model_info(
 
 #[tauri::command]
 async fn hf_download_model(
+    app: tauri::AppHandle,
     state: State<'_, Arc<AppState>>,
     repo_id: String,
     filename: String,
@@ -289,11 +290,29 @@ async fn hf_download_model(
     let output_path = models_dir.join(&filename);
     
     let client = state.hf_client.read().await;
-    let result_path = client.download_file(
+    
+    // Use download_file_with_progress to emit progress events
+    let result_path = client.download_file_with_progress(
         &repo_id,
         &filename,
         revision.as_deref(),
         output_path,
+        |downloaded, total| {
+            let progress = if let Some(total) = total {
+                (downloaded as f64 / total as f64 * 100.0) as u32
+            } else {
+                0
+            };
+            
+            // Emit progress event
+            let _ = app.emit("download-progress", serde_json::json!({
+                "repo_id": repo_id,
+                "filename": filename,
+                "downloaded": downloaded,
+                "total": total,
+                "progress": progress,
+            }));
+        },
     )
     .await
     .map_err(|e| e.to_string())?;
@@ -322,7 +341,7 @@ async fn hf_discover_gguf_models(
     task: Option<String>,
     sort: Option<String>,
     limit: Option<u32>,
-) -> Result<Vec<huggingface::GGUFModelInfo>, String> {
+) -> Result<Vec<huggingface::GGUFModelMetadata>, String> {
     info!("Discovering GGUF models from HuggingFace");
     
     let mut params = ModelSearchParams::new();
@@ -350,6 +369,22 @@ async fn hf_discover_gguf_models(
         .await
         .map_err(|e| {
             error!("Failed to discover GGUF models: {}", e);
+            e.to_string()
+        })
+}
+
+#[tauri::command]
+async fn hf_get_gguf_files(
+    state: State<'_, Arc<AppState>>,
+    repo_id: String,
+) -> Result<Vec<huggingface::GGUFFile>, String> {
+    info!("Getting GGUF files for {}", repo_id);
+    
+    let client = state.hf_client.read().await;
+    client.get_gguf_files(&repo_id)
+        .await
+        .map_err(|e| {
+            error!("Failed to get GGUF files for {}: {}", repo_id, e);
             e.to_string()
         })
 }
@@ -414,6 +449,7 @@ pub fn run() {
             hf_download_model,
             hf_set_token,
             hf_discover_gguf_models,
+            hf_get_gguf_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
