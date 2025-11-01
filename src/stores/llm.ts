@@ -27,13 +27,13 @@ export const useLLMStore = create<LLMState>((set) => ({
     set({ isLoading: true, error: null });
 
     try {
-      await invoke('initialize_llm', { modelName });
+      const loadedModelName = await invoke<string>('initialize_llm', { modelName });
       
       // Extract display name from filename (remove .gguf extension)
-      const displayName = modelName.replace('.gguf', '');
+      const displayName = loadedModelName.replace('.gguf', '');
       
       set({ 
-        modelPath: modelName,
+        modelPath: loadedModelName,
         modelName: displayName,
         isModelLoaded: true,
         isLoading: false,
@@ -64,24 +64,31 @@ export const useLLMStore = create<LLMState>((set) => ({
 
   // Restore model from settings on app startup
   hydrateFromSettings: async () => {
+    set({ isLoading: true });
     try {
-      const currentModel = await invoke<string | null>('get_current_model');
+      // initialize_llm automatically loads the last used model from settings
+      const loadedModelName = await invoke<string>('initialize_llm');
       
-      if (currentModel) {
-        console.log('Restoring model from settings:', currentModel);
-        // Extract display name from filename (remove .gguf extension)
-        const displayName = currentModel.replace('.gguf', '');
-        
-        set({ 
-          modelPath: currentModel,
-          modelName: displayName,
-          isModelLoaded: true,
-          error: null
-        });
-      }
+      console.log('Model restored and loaded:', loadedModelName);
+      
+      // Extract display name from filename (remove .gguf extension)
+      const displayName = loadedModelName.replace('.gguf', '');
+      
+      set({ 
+        modelPath: loadedModelName,
+        modelName: displayName,
+        isModelLoaded: true,
+        isLoading: false,
+        error: null
+      });
     } catch (error) {
       console.error('Failed to restore model from settings:', error);
-      // Don't set error state, just log it - this is not critical
+      // If no model was saved or loading failed, just mark as not loading
+      set({ 
+        isModelLoaded: false,
+        isLoading: false,
+        error: null // Don't show error if no model was previously saved
+      });
     }
   },
 }));

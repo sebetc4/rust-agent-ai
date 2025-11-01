@@ -1,4 +1,4 @@
-/// Commandes Tauri pour la gestion du LLM
+/// Tauri commands for LLM management
 
 use crate::AppState;
 use crate::context;
@@ -9,17 +9,29 @@ use tracing::{info, error};
 #[tauri::command]
 pub async fn initialize_llm(
     state: State<'_, Arc<AppState>>,
-    model_name: String,
 ) -> Result<String, String> {
-    info!("Chargement du modèle LLM: {}", model_name);
+    let model_to_load = match state.settings_repo.get_current_model().await {
+        Ok(Some(saved_model)) => {
+            info!("Loading last used model: {}", saved_model);
+            saved_model
+        }
+        Ok(None) => {
+            return Err("No previous model found in settings. Please select a model first.".to_string());
+        }
+        Err(e) => {
+            return Err(format!("Failed to retrieve saved model: {}", e));
+        }
+    };
+    
+    info!("Initializing LLM with model: {}", model_to_load);
     
     // Check if model exists
-    if !state.model_manager.model_exists(&model_name) {
-        return Err(format!("Model file not found: {}. Please ensure the model is in the models directory.", model_name));
+    if !state.model_manager.model_exists(&model_to_load) {
+        return Err(format!("Model file not found: {}. Please ensure the model is in the models directory.", model_to_load));
     }
     
     // Get full path to model
-    let model_path = state.model_manager.get_model_path(&model_name);
+    let model_path = state.model_manager.get_model_path(&model_to_load);
     
     // Update the model path in the existing engine
     let engine = state.llm_engine.read().await;
@@ -35,12 +47,8 @@ pub async fn initialize_llm(
         engine_write.load_model().await.map_err(|e| e.to_string())?;
     }
     
-    // Persist current model to settings
-    if let Err(e) = state.settings_repo.set_current_model(&model_name).await {
-        error!("Failed to persist current model: {}", e);
-    }
-    
-    Ok("Modèle chargé avec succès".to_string())
+    // Return the loaded model name
+    Ok(model_to_load)
 }
 
 #[tauri::command]
@@ -84,24 +92,24 @@ pub async fn send_message(
     session_id: String,
     content: String,
 ) -> Result<String, String> {
-    info!("Envoi de message pour session: {}", session_id);
+    info!("Sending message for session: {}", session_id);
     
-    // 1. Ajouter le message utilisateur
+    // 1. Add user message
     let user_message = context::Message::new(context::MessageRole::User, content.clone());
     {
         let context_manager = state.context_manager.read().await;
         context_manager.add_message(&session_id, user_message).await
-            .map_err(|e| format!("Erreur ajout message: {}", e))?;
+            .map_err(|e| format!("Error adding message: {}", e))?;
     }
     
-    // 2. Récupérer le contexte complet de la session
+    // 2. Get complete session context
     let session = {
         let context_manager = state.context_manager.read().await;
         context_manager.get_session(&session_id).await
-            .map_err(|e| format!("Erreur récupération session: {}", e))?
+            .map_err(|e| format!("Error retrieving session: {}", e))?
     };
     
-    // 3. Construire le contexte pour le LLM
+    // 3. Build context for LLM
     let mut context_str = String::new();
     for message in &session.messages {
         let role = match message.role {
@@ -114,22 +122,22 @@ pub async fn send_message(
     }
     context_str.push_str("Assistant: ");
     
-    // 4. Générer la réponse avec le LLM
+    // 4. Generate response with LLM
     let response = {
         let engine = state.llm_engine.read().await;
         engine.generate(&context_str).await
-            .map_err(|e| format!("Erreur génération LLM: {}", e))?
+            .map_err(|e| format!("LLM generation error: {}", e))?
     };
     
-    // 5. Ajouter la réponse de l'assistant
+    // 5. Add assistant response
     let assistant_message = context::Message::new(context::MessageRole::Assistant, response.text.clone());
     {
         let context_manager = state.context_manager.read().await;
         context_manager.add_message(&session_id, assistant_message).await
-            .map_err(|e| format!("Erreur ajout réponse: {}", e))?;
+            .map_err(|e| format!("Error adding response: {}", e))?;
     }
     
-    info!("Message envoyé et réponse générée pour session {}", session_id);
+    info!("Message sent and response generated for session {}", session_id);
     Ok(response.text)
 }
 
@@ -139,7 +147,7 @@ pub async fn generate_response(
     session_id: String,
     prompt: String,
 ) -> Result<String, String> {
-    info!("Génération de réponse pour session: {}", session_id);
+    info!("Generating response for session: {}", session_id);
     
     // Get the session with full context
     let context_manager = state.context_manager.read().await;
