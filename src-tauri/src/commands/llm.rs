@@ -1,5 +1,3 @@
-/// Tauri commands for LLM management
-
 use crate::AppState;
 use crate::context;
 use std::sync::Arc;

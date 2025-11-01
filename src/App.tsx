@@ -1,46 +1,27 @@
-import "./index.css";
-import { useState } from "react";
-import { useLLMStore } from "@/stores/llm";
-import { useHydration } from "@/hooks/useHydration";
-import { 
-  ChatPage, 
-  ModelsPage, 
-  SettingsPage, 
-  ModelLoadingPage, 
-  ModelErrorPage 
-} from "@/pages";
+import './index.css'
+import { useLLMStore } from '@/stores/llm'
+import { useHydration } from '@/hooks/useHydration'
+import { ErrorPage } from '@/pages'
+import { AppLoader } from '@/components/common'
+import { Router } from './router'
 
-type Page = 'chat' | 'models' | 'settings';
+const App = () => {
+    const { isLoading: isModelLoading, error: modelError } = useLLMStore()
+    const { isHydrated, error: hydrationError } = useHydration()
 
-function App() {
-  const [currentPage, setCurrentPage] = useState<Page>('chat');
-  const { isLoading: isModelLoading, error: modelError } = useLLMStore();
-  const { isHydrated, error: hydrationError } = useHydration();
+    if (!isHydrated || isModelLoading) {
+        return <AppLoader />
+    }
 
-  // Show loading while hydrating app state
-  if (!isHydrated || isModelLoading) {
-    return <ModelLoadingPage />;
-  }
+    if (hydrationError) {
+        return <ErrorPage error={hydrationError} />
+    }
 
-  // Show error if hydration failed critically
-  if (hydrationError) {
-    return <ModelErrorPage error={hydrationError} />;
-  }
+    if (modelError) {
+        return <ErrorPage error={modelError} />
+    }
 
-  // Show model error if loading failed
-  if (modelError) {
-    return <ModelErrorPage error={modelError} />;
-  }
-
-  switch (currentPage) {
-    case 'models':
-      return <ModelsPage onPageChange={setCurrentPage} />;
-    case 'settings':
-      return <SettingsPage onPageChange={setCurrentPage} />;
-    case 'chat':
-    default:
-      return <ChatPage onPageChange={setCurrentPage} />;
-  }
+    return <Router />
 }
 
-export default App;
+export default App

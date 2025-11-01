@@ -5,17 +5,14 @@ import { MessageList } from '@/components/chat/MessageList';
 import { SessionList, SessionTitle } from '@/components/session';
 import { useSessionStore } from '@/stores/session';
 import { useLLMStore } from '@/stores/llm';
+import { useNavigate } from 'react-router-dom';
 import { Loader2, Download, Settings, Cpu, Menu, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { Path } from '@/constants';
 
-type Page = 'chat' | 'models' | 'settings';
-
-interface ChatPageProps {
-  onPageChange: (page: Page) => void;
-}
-
-export function ChatPage({ onPageChange }: ChatPageProps) {
+export const ChatPage = () => {
+  const navigate = useNavigate();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
@@ -131,11 +128,11 @@ export function ChatPage({ onPageChange }: ChatPageProps) {
               </div>
               
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => onPageChange('models')}>
+                <Button variant="outline" size="sm" onClick={() => navigate(Path.MODELS)}>
                   <Download className="h-4 w-4 mr-2" />
                   Models
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => onPageChange('settings')}>
+                <Button variant="outline" size="sm" onClick={() => navigate(Path.SETTINGS)}>
                   <Settings className="h-4 w-4 mr-2" />
                   Settings
                 </Button>

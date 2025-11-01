@@ -2,11 +2,7 @@ import { useEffect, useState } from 'react';
 import { useLLMStore } from '../stores/llm';
 import { useSessionStore } from '../stores/session';
 
-/**
- * Hook to hydrate stores from persisted data on app startup
- * Call this once in the root component (App.tsx or MainLayout)
- */
-export function useHydration() {
+export const useHydration = () => {
   const [isHydrated, setIsHydrated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
@@ -20,10 +16,7 @@ export function useHydration() {
       try {
         console.log('🔄 Hydrating app state from persistence...');
         
-        // Restore model settings
         await hydrateModel();
-        
-        // Load sessions list
         await loadSessions();
         
         if (isMounted) {

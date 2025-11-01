@@ -1,27 +1,13 @@
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, AlertCircle } from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
 import { useLLMStore } from '@/stores/llm';
 
-export function ModelLoadingPage() {
-  return (
-    <main className="min-h-screen bg-background flex items-center justify-center">
-      <Card className="p-8 flex flex-col items-center gap-4">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <div className="text-center">
-          <h2 className="text-lg font-semibold">Loading Model</h2>
-          <p className="text-sm text-muted-foreground">Initializing Qwen3-1.7B...</p>
-        </div>
-      </Card>
-    </main>
-  );
-}
-
-interface ModelErrorPageProps {
+interface ErrorPageProps {
   error: string;
 }
 
-export function ModelErrorPage({ error }: ModelErrorPageProps) {
+export const ErrorPage = ({ error }: ErrorPageProps) => {
   const { loadModel } = useLLMStore();
 
   return (
