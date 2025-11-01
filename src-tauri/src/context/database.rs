@@ -95,6 +95,20 @@ impl Database {
         .await
         .context("Failed to create conversations index")?;
         
+        // Create settings table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .context("Failed to create settings table")?;
+        
         info!("Database migrations completed successfully");
         
         Ok(())

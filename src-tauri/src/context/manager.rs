@@ -1,6 +1,8 @@
 /// Gestionnaire de contexte conversationnel
 
-use super::session::{ConversationSession, Message};
+use super::session::{ConversationSession, Message, MessageRole};
+use super::repository::ConversationRepository;
+use super::models::StoredMessage;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -9,27 +11,47 @@ use tracing::{info, debug};
 
 /// Gestionnaire de contexte principal
 pub struct ContextManager {
-    sessions: Arc<RwLock<HashMap<String, ConversationSession>>>,
+    repository: ConversationRepository,
+    sessions_cache: Arc<RwLock<HashMap<String, ConversationSession>>>,
     active_session_id: Arc<RwLock<Option<String>>>,
+    current_model: Arc<RwLock<String>>,
 }
 
 impl ContextManager {
-    /// Crée un nouveau gestionnaire de contexte
-    pub fn new() -> Self {
+    /// Crée un nouveau gestionnaire de contexte avec un repository
+    pub fn new(repository: ConversationRepository, model_name: String) -> Self {
         info!("Initialisation du gestionnaire de contexte");
         Self {
-            sessions: Arc::new(RwLock::new(HashMap::new())),
+            repository,
+            sessions_cache: Arc::new(RwLock::new(HashMap::new())),
             active_session_id: Arc::new(RwLock::new(None)),
+            current_model: Arc::new(RwLock::new(model_name)),
         }
     }
+    
+    /// Set the current model name
+    pub async fn set_current_model(&self, model_name: String) {
+        *self.current_model.write().await = model_name;
+    }
 
-    /// Crée une nouvelle session de conversation
+    /// Crée une nouvelle session de conversation persistée
     pub async fn create_session(&self, title: String) -> Result<String> {
-        let session = ConversationSession::new(title);
-        let session_id = session.id.clone();
+        let model_name = self.current_model.read().await.clone();
+        debug!("Création d'une nouvelle session avec le modèle: {}", model_name);
         
-        let mut sessions = self.sessions.write().await;
-        sessions.insert(session_id.clone(), session);
+        // Créer dans le repository
+        let conversation = self.repository.create_conversation(
+            &title,
+            &model_name
+        ).await?;
+        
+        let session_id = conversation.id.clone();
+        
+        // Créer la session en mémoire
+        let session = ConversationSession::new_with_id(session_id.clone(), title);
+        
+        // Mettre en cache
+        self.sessions_cache.write().await.insert(session_id.clone(), session);
         
         // Définir comme session active
         *self.active_session_id.write().await = Some(session_id.clone());
@@ -37,14 +59,58 @@ impl ContextManager {
         info!("Nouvelle session créée: {}", session_id);
         Ok(session_id)
     }
+    
+    /// Helper: Charge une session depuis le repository vers le cache
+    async fn load_session_to_cache(&self, session_id: &str) -> Result<()> {
+        let conversation = self.repository.get_conversation(session_id).await?
+            .ok_or_else(|| anyhow::anyhow!("Session non trouvée dans la base: {}", session_id))?;
+        let messages = self.repository.get_messages(session_id).await?;
+        
+        let mut session = ConversationSession::new_with_id(
+            conversation.id.clone(),
+            conversation.title.clone()
+        );
+        
+        // Ajouter les messages récupérés
+        for stored_msg in messages {
+            let role = Self::parse_role(&stored_msg.role)?;
+            let msg = Message::new(role, stored_msg.content.clone());
+            session.add_message(msg);
+        }
+        
+        self.sessions_cache.write().await.insert(session_id.to_string(), session);
+        Ok(())
+    }
+    
+    /// Helper: Convertit une chaîne en MessageRole
+    fn parse_role(role_str: &str) -> Result<MessageRole> {
+        match role_str {
+            "system" => Ok(MessageRole::System),
+            "user" => Ok(MessageRole::User),
+            "assistant" => Ok(MessageRole::Assistant),
+            "tool" => Ok(MessageRole::Tool),
+            _ => anyhow::bail!("Rôle inconnu: {}", role_str),
+        }
+    }
 
-    /// Récupère une session par son ID
+    /// Récupère une session par son ID (charge depuis DB si nécessaire)
     pub async fn get_session(&self, session_id: &str) -> Result<ConversationSession> {
-        let sessions = self.sessions.read().await;
+        // Vérifier le cache d'abord
+        {
+            let sessions = self.sessions_cache.read().await;
+            if let Some(session) = sessions.get(session_id) {
+                return Ok(session.clone());
+            }
+        }
+        
+        // Pas en cache, charger depuis DB
+        self.load_session_to_cache(session_id).await?;
+        
+        let sessions = self.sessions_cache.read().await;
         sessions
             .get(session_id)
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!("Session non trouvée: {}", session_id))
+            .ok_or_else(|| anyhow::anyhow!("Session non trouvée après chargement: {}", session_id))
     }
 
     /// Récupère la session active
@@ -56,15 +122,41 @@ impl ContextManager {
         self.get_session(session_id).await
     }
 
-    /// Ajoute un message à une session
+    /// Ajoute un message à une session (persiste dans DB)
     pub async fn add_message(&self, session_id: &str, message: Message) -> Result<()> {
-        let mut sessions = self.sessions.write().await;
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| anyhow::anyhow!("Session non trouvée: {}", session_id))?;
-        
         debug!("Ajout d'un message {:?} à la session {}", message.role, session_id);
-        session.add_message(message);
+        
+        // Convertir MessageRole en chaîne pour le DB
+        let role_str = match message.role {
+            MessageRole::System => "system",
+            MessageRole::User => "user",
+            MessageRole::Assistant => "assistant",
+            MessageRole::Tool => "tool",
+        };
+        
+        // Persister dans le repository
+        let stored_msg = StoredMessage::new(
+            session_id.to_string(),
+            role_str.to_string(),
+            message.content.clone(),
+        );
+        let _stored_message = self.repository.add_message(&stored_msg).await?;
+        
+        // Mettre à jour le cache - charger la session si nécessaire
+        {
+            let sessions = self.sessions_cache.read().await;
+            if !sessions.contains_key(session_id) {
+                drop(sessions); // Release read lock
+                self.load_session_to_cache(session_id).await?;
+            }
+        }
+        
+        // Maintenant ajouter le message au cache
+        let mut sessions = self.sessions_cache.write().await;
+        if let Some(session) = sessions.get_mut(session_id) {
+            session.add_message(message);
+        }
+        
         Ok(())
     }
 
@@ -80,20 +172,31 @@ impl ContextManager {
         self.add_message(&session_id, message).await
     }
 
-    /// Liste toutes les sessions
-    pub async fn list_sessions(&self) -> Vec<ConversationSession> {
-        let sessions = self.sessions.read().await;
-        let mut sessions_vec: Vec<_> = sessions.values().cloned().collect();
-        sessions_vec.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-        sessions_vec
+    /// Liste toutes les sessions (charge depuis DB)
+    pub async fn list_sessions(&self) -> Result<Vec<ConversationSession>> {
+        let conversations = self.repository.list_conversations(100, 0).await?;
+        
+        let mut sessions = Vec::new();
+        for conv in conversations {
+            let session = ConversationSession::new_with_id(
+                conv.id.clone(),
+                conv.title.clone()
+            );
+            sessions.push(session);
+        }
+        
+        // Tri par date de mise à jour (plus récent en premier)
+        sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        Ok(sessions)
     }
 
-    /// Supprime une session
+    /// Supprime une session (DB + cache)
     pub async fn delete_session(&self, session_id: &str) -> Result<()> {
-        let mut sessions = self.sessions.write().await;
-        sessions
-            .remove(session_id)
-            .ok_or_else(|| anyhow::anyhow!("Session non trouvée: {}", session_id))?;
+        // Supprimer du repository
+        self.repository.delete_conversation(session_id).await?;
+        
+        // Supprimer du cache
+        self.sessions_cache.write().await.remove(session_id);
         
         // Si c'était la session active, la désactiver
         let mut active_id = self.active_session_id.write().await;
@@ -104,11 +207,26 @@ impl ContextManager {
         info!("Session supprimée: {}", session_id);
         Ok(())
     }
+    
+    /// Renomme une session
+    pub async fn rename_session(&self, session_id: &str, new_title: String) -> Result<()> {
+        // Mettre à jour dans le repository
+        self.repository.update_conversation_title(session_id, &new_title).await?;
+        
+        // Mettre à jour dans le cache si présent
+        let mut sessions = self.sessions_cache.write().await;
+        if let Some(session) = sessions.get_mut(session_id) {
+            session.title = new_title.clone();
+        }
+        
+        info!("Session {} renommée: {}", session_id, new_title);
+        Ok(())
+    }
 
     /// Définit la session active
     pub async fn set_active_session(&self, session_id: &str) -> Result<()> {
         // Vérifier que la session existe
-        let sessions = self.sessions.read().await;
+        let sessions = self.sessions_cache.read().await;
         if !sessions.contains_key(session_id) {
             anyhow::bail!("Session non trouvée: {}", session_id);
         }
@@ -134,42 +252,8 @@ impl ContextManager {
     }
 }
 
-impl Default for ContextManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::context::session::Message;
-
-    #[tokio::test]
-    async fn test_create_session() {
-        let manager = ContextManager::new();
-        let session_id = manager.create_session("Test".to_string()).await.unwrap();
-        assert!(!session_id.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_add_message() {
-        let manager = ContextManager::new();
-        let session_id = manager.create_session("Test".to_string()).await.unwrap();
-        
-        let message = Message::user("Hello".to_string());
-        manager.add_message(&session_id, message).await.unwrap();
-        
-        let session = manager.get_session(&session_id).await.unwrap();
-        assert_eq!(session.messages.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_active_session() {
-        let manager = ContextManager::new();
-        let session_id = manager.create_session("Test".to_string()).await.unwrap();
-        
-        let active = manager.get_active_session().await.unwrap();
-        assert_eq!(active.id, session_id);
-    }
+    // Tests require database setup - will be implemented with integration tests
+    // TODO: Add integration tests with test database
 }

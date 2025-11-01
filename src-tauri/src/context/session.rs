@@ -81,6 +81,18 @@ impl ConversationSession {
             metadata: HashMap::new(),
         }
     }
+    
+    pub fn new_with_id(id: String, title: String) -> Self {
+        let now = Utc::now();
+        Self {
+            id,
+            title,
+            created_at: now,
+            updated_at: now,
+            messages: vec![],
+            metadata: HashMap::new(),
+        }
+    }
 
     pub fn add_message(&mut self, message: Message) {
         self.messages.push(message);

@@ -1,12 +1,22 @@
 // Message types
 export interface Message {
   id: string;
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
-  timestamp: Date;
+  timestamp: string; // ISO string from backend
+  metadata?: Record<string, any>;
 }
 
-// Session types
+export interface ConversationSession {
+  id: string;
+  title: string;
+  created_at: string; 
+  updated_at: string; 
+  messages: Message[];
+  metadata?: Record<string, any>;
+}
+
+// Legacy Session type for compatibility
 export interface Session {
   id: string;
   title: string;

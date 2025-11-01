@@ -7,6 +7,10 @@ interface ChatMessageProps {
 
 export function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === 'user';
+  
+  // Parse timestamp (ISO string from backend)
+  const timestamp = new Date(message.timestamp);
+  const timeString = timestamp.toLocaleTimeString();
 
   return (
     <div
@@ -27,7 +31,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
           {message.content}
         </div>
         <div className="text-xs opacity-70 mt-1">
-          {message.timestamp.toLocaleTimeString()}
+          {timeString}
         </div>
       </div>
     </div>
