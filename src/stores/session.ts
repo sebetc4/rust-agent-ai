@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import type { ConversationSession, Message } from '../types';
+import type { ConversationSession } from '../types';
 
 interface SessionState {
   // State
@@ -13,14 +13,12 @@ interface SessionState {
   loadSessions: () => Promise<void>;
   createSession: (title: string) => Promise<string | null>;
   selectSession: (id: string) => Promise<void>;
-  addMessage: (role: 'user' | 'assistant' | 'system' | 'tool', content: string) => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
   renameSession: (id: string, newTitle: string) => Promise<void>;
   clearError: () => void;
   
   // Getters
   getActiveSession: () => ConversationSession | null;
-  getMessages: () => Message[];
 }
 
 export const useSessionStore = create<SessionState>((set, get) => ({
@@ -79,6 +77,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         activeSessionId: id,
         isLoading: false
       }));
+
+      // Charger les messages dans le message store
+      const { useMessageStore } = await import('./message');
+      await useMessageStore.getState().loadMessages(id);
     } catch (error) {
       console.error('Failed to load session:', error);
       set({ 
@@ -88,38 +90,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
-  // Add a message to the active session
-  addMessage: async (role: 'user' | 'assistant' | 'system' | 'tool', content: string) => {
-    const { activeSessionId } = get();
-    if (!activeSessionId) {
-      set({ error: 'No active session' });
-      return;
-    }
-
-    set({ isLoading: true, error: null });
-    try {
-      await invoke('add_message', {
-        sessionId: activeSessionId,
-        role,
-        content
-      });
-
-      // Reload the active session to get the updated messages
-      await get().selectSession(activeSessionId);
-    } catch (error) {
-      console.error('Failed to add message:', error);
-      set({ 
-        error: error instanceof Error ? error.message : 'Failed to add message',
-        isLoading: false 
-      });
-    }
-  },
-
-  // Delete a session
   deleteSession: async (id: string) => {
     set({ isLoading: true, error: null });
     try {
       await invoke('delete_session', { sessionId: id });
+      
+      // Si on supprime la session active, vider les messages
+      const wasActive = get().activeSessionId === id;
       
       set(state => {
         const newSessions = state.sessions.filter(s => s.id !== id);
@@ -133,6 +110,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           isLoading: false
         };
       });
+
+      // Charger les messages de la nouvelle session active ou vider
+      const { useMessageStore } = await import('./message');
+      const newActiveId = get().activeSessionId;
+      if (wasActive) {
+        if (newActiveId) {
+          await useMessageStore.getState().loadMessages(newActiveId);
+        } else {
+          useMessageStore.getState().clearMessages();
+        }
+      }
     } catch (error) {
       console.error('Failed to delete session:', error);
       set({ 
@@ -142,7 +130,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
-  // Rename a session
   renameSession: async (id: string, newTitle: string) => {
     set({ isLoading: true, error: null });
     try {
@@ -151,7 +138,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         newTitle 
       });
       
-      // Mise à jour optimiste locale
       set(state => ({
         sessions: state.sessions.map(s => 
           s.id === id ? { ...s, title: newTitle, updated_at: new Date().toISOString() } : s
@@ -167,18 +153,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
-  // Clear error
   clearError: () => set({ error: null }),
 
-  // Get active session
   getActiveSession: () => {
     const { sessions, activeSessionId } = get();
     return sessions.find(s => s.id === activeSessionId) || null;
-  },
-
-  // Get messages from active session
-  getMessages: () => {
-    const activeSession = get().getActiveSession();
-    return activeSession?.messages || [];
   }
 }));

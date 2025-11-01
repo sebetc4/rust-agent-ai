@@ -84,19 +84,27 @@ pub async fn switch_model(
     Ok(format!("Switched to model: {}", model_name))
 }
 
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SendMessageResponse {
+    pub user_message: context::Message,
+    pub assistant_message: context::Message,
+}
+
 #[tauri::command]
 pub async fn send_message(
     state: State<'_, Arc<AppState>>,
     session_id: String,
     content: String,
-) -> Result<String, String> {
+) -> Result<SendMessageResponse, String> {
     info!("Sending message for session: {}", session_id);
     
     // 1. Add user message
     let user_message = context::Message::new(context::MessageRole::User, content.clone());
     {
         let context_manager = state.context_manager.read().await;
-        context_manager.add_message(&session_id, user_message).await
+        context_manager.add_message(&session_id, user_message.clone()).await
             .map_err(|e| format!("Error adding message: {}", e))?;
     }
     
@@ -131,12 +139,15 @@ pub async fn send_message(
     let assistant_message = context::Message::new(context::MessageRole::Assistant, response.text.clone());
     {
         let context_manager = state.context_manager.read().await;
-        context_manager.add_message(&session_id, assistant_message).await
+        context_manager.add_message(&session_id, assistant_message.clone()).await
             .map_err(|e| format!("Error adding response: {}", e))?;
     }
     
     info!("Message sent and response generated for session {}", session_id);
-    Ok(response.text)
+    Ok(SendMessageResponse {
+        user_message,
+        assistant_message,
+    })
 }
 
 #[tauri::command]

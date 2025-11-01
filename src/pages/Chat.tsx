@@ -3,34 +3,35 @@ import { Button } from '@/components/ui/button';
 import { ChatInput } from '@/components/chat/ChatInput';
 import { MessageList } from '@/components/chat/MessageList';
 import { SessionList, SessionTitle } from '@/components/session';
-import { useSessionStore } from '@/stores/session';
+import { useSessionStore, useMessageStore } from '@/stores';
 import { useLLMStore } from '@/stores/llm';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, Download, Settings, Cpu, Menu, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import { Path } from '@/constants';
 
 export const ChatPage = () => {
   const navigate = useNavigate();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [generationError, setGenerationError] = useState<string | null>(null);
   
   const { 
-    getMessages, 
     getActiveSession, 
     isLoading: isSessionLoading, 
     error: sessionError, 
-    loadSessions,
     createSession,
     renameSession,
     activeSessionId 
   } = useSessionStore();
+
+  const {
+    messages,
+    sendMessage,
+    isGenerating,
+    error: messageError
+  } = useMessageStore();
   
   const { isModelLoaded, modelName } = useLLMStore();
   
-  const messages = getMessages();
   const activeSession = getActiveSession();
 
   // Create initial session if none exists
@@ -39,35 +40,6 @@ export const ChatPage = () => {
       createSession('New Conversation');
     }
   }, [activeSessionId, isModelLoaded, createSession]);
-
-  const handleSendMessage = async (content: string) => {
-    if (!activeSessionId) {
-      console.error('No active session');
-      return;
-    }
-
-    setGenerationError(null);
-    setIsGenerating(true);
-    
-    try {
-      // Envoyer le message et générer la réponse en un seul appel
-      const response = await invoke<string>('send_message', {
-        sessionId: activeSessionId,
-        content: content
-      });
-
-      console.log('LLM Response:', response);
-      
-      // Recharger la session pour afficher les nouveaux messages
-      await loadSessions();
-      
-    } catch (error) {
-      console.error('Failed to send message:', error);
-      setGenerationError(error instanceof Error ? error.message : 'Failed to send message');
-    } finally {
-      setIsGenerating(false);
-    }
-  };
 
   const handleRenameSession = async (newTitle: string) => {
     if (activeSessionId) {
@@ -157,15 +129,15 @@ export const ChatPage = () => {
             </div>
           )}
           
-          {generationError && (
+          {messageError && (
             <div className="px-4 py-2 bg-destructive/10 text-destructive text-sm">
-              Error: {generationError}
+              Error: {messageError}
             </div>
           )}
           
           <div className="border-t p-4">
             <ChatInput 
-              onSend={handleSendMessage} 
+              onSend={sendMessage} 
               disabled={isSessionLoading || isGenerating || !isModelLoaded || !activeSessionId} 
             />
           </div>
