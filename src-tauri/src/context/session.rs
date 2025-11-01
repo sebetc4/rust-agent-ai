@@ -58,7 +58,16 @@ impl Message {
     }
 }
 
-/// Session de conversation
+/// Résumé d'une session (sans les messages) pour l'affichage dans la liste
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionSummary {
+    pub id: String,
+    pub title: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Session de conversation complète avec tous les messages
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationSession {
     pub id: String,

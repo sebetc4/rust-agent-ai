@@ -7,6 +7,15 @@ export interface Message {
   metadata?: Record<string, any>;
 }
 
+// Session summary for listing (without messages)
+export interface SessionSummary {
+  id: string;
+  title: string;
+  created_at: string; 
+  updated_at: string; 
+}
+
+// Full conversation session with all messages
 export interface ConversationSession {
   id: string;
   title: string;

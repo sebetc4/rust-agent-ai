@@ -1,6 +1,6 @@
 /// Gestionnaire de contexte conversationnel
 
-use super::session::{ConversationSession, Message, MessageRole};
+use super::session::{ConversationSession, SessionSummary, Message, MessageRole};
 use super::repository::ConversationRepository;
 use super::models::StoredMessage;
 use anyhow::Result;
@@ -172,21 +172,20 @@ impl ContextManager {
         self.add_message(&session_id, message).await
     }
 
-    /// Liste toutes les sessions (charge depuis DB)
-    pub async fn list_sessions(&self) -> Result<Vec<ConversationSession>> {
+    /// Liste toutes les sessions (version légère sans messages)
+    pub async fn list_sessions(&self) -> Result<Vec<SessionSummary>> {
         let conversations = self.repository.list_conversations(100, 0).await?;
         
-        let mut sessions = Vec::new();
-        for conv in conversations {
-            let session = ConversationSession::new_with_id(
-                conv.id.clone(),
-                conv.title.clone()
-            );
-            sessions.push(session);
-        }
+        let sessions: Vec<SessionSummary> = conversations
+            .into_iter()
+            .map(|conv| SessionSummary {
+                id: conv.id,
+                title: conv.title,
+                created_at: conv.created_at,
+                updated_at: conv.updated_at,
+            })
+            .collect();
         
-        // Tri par date de mise à jour (plus récent en premier)
-        sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         Ok(sessions)
     }
 

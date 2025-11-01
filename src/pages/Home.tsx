@@ -118,11 +118,6 @@ export const HomePage = () => {
                         <p className="text-xs text-muted-foreground">
                           {getRelativeTime(session.updated_at)}
                         </p>
-                        {session.messages.length > 0 && (
-                          <p className="text-sm text-muted-foreground mt-2 line-clamp-2">
-                            {session.messages[session.messages.length - 1].content}
-                          </p>
-                        )}
                       </div>
                     </div>
                   </Card>

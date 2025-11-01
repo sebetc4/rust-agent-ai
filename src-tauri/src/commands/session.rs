@@ -1,7 +1,7 @@
 /// Commandes Tauri pour la gestion des sessions de conversation
 
 use crate::AppState;
-use crate::context::{ConversationSession, Message, MessageRole};
+use crate::context::{ConversationSession, SessionSummary, Message, MessageRole};
 use std::sync::Arc;
 use tauri::State;
 use tracing::info;
@@ -70,7 +70,7 @@ pub async fn get_session(
 #[tauri::command]
 pub async fn list_sessions(
     state: State<'_, Arc<AppState>>,
-) -> Result<Vec<ConversationSession>, String> {
+) -> Result<Vec<SessionSummary>, String> {
     state.context_manager
         .read()
         .await

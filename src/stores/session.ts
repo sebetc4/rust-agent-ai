@@ -1,10 +1,10 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import type { ConversationSession } from '../types';
+import type { SessionSummary, ConversationSession } from '../types';
 
 interface SessionState {
   // State
-  sessions: ConversationSession[];
+  sessions: SessionSummary[];  // Liste légère sans messages
   activeSessionId: string | null;
   isLoading: boolean;
   error: string | null;
@@ -18,7 +18,7 @@ interface SessionState {
   clearError: () => void;
   
   // Getters
-  getActiveSession: () => ConversationSession | null;
+  getActiveSession: () => SessionSummary | null;
 }
 
 export const useSessionStore = create<SessionState>((set, get) => ({
@@ -30,7 +30,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   loadSessions: async () => {
     set({ isLoading: true, error: null });
     try {
-      const sessions = await invoke<ConversationSession[]>('list_sessions');
+      const sessions = await invoke<SessionSummary[]>('list_sessions');
       set({ sessions, isLoading: false });
       
       const { activeSessionId } = get();
@@ -70,10 +70,16 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   selectSession: async (id: string) => {
     set({ isLoading: true, error: null });
     try {
+      // Récupérer la session complète (avec messages) - sera utilisée par messageStore
       const session = await invoke<ConversationSession>('get_session', { sessionId: id });
       
+      // Mettre à jour la session dans la liste (si elle existe déjà)
       set(state => ({
-        sessions: state.sessions.map(s => s.id === id ? session : s),
+        sessions: state.sessions.map(s => 
+          s.id === id 
+            ? { id: session.id, title: session.title, created_at: session.created_at, updated_at: session.updated_at }
+            : s
+        ),
         activeSessionId: id,
         isLoading: false
       }));

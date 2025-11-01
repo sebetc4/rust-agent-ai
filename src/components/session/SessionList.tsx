@@ -70,18 +70,8 @@ export function SessionList() {
     }
   };
 
-  const getMessagePreview = (sessionId: string) => {
-    const session = sessions.find(s => s.id === sessionId);
-    if (!session || session.messages.length === 0) {
-      return 'No messages yet';
-    }
-    
-    const lastMessage = session.messages[session.messages.length - 1];
-    const preview = lastMessage.content.slice(0, 50);
-    return preview.length < lastMessage.content.length 
-      ? `${preview}...` 
-      : preview;
-  };
+  // Note: Message preview supprimé - les sessions ne contiennent plus les messages
+  // Pour afficher un aperçu, il faudrait charger les messages de chaque session
 
   return (
     <div className="flex flex-col h-full bg-muted/30">
@@ -131,21 +121,12 @@ export function SessionList() {
                   </Button>
                 </div>
 
-                {/* Message Preview */}
-                <p className="text-xs text-muted-foreground line-clamp-2 mb-2">
-                  {getMessagePreview(session.id)}
-                </p>
-
+                {/* Message Preview - Removed: sessions no longer contain messages */}
+                
                 {/* Metadata */}
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Clock className="h-3 w-3" />
                   <span>{formatDate(session.updated_at)}</span>
-                  {session.messages.length > 0 && (
-                    <>
-                      <span>•</span>
-                      <span>{session.messages.length} messages</span>
-                    </>
-                  )}
                 </div>
               </div>
             ))
